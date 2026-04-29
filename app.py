@@ -124,21 +124,30 @@ def generate_summary(pdf_text: str, transcript: str) -> str:
 
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel(
-        "gemini-1.5-flash",
+        "gemini-2.5-flash",
         system_instruction=_SYSTEM_PROMPT,
     )
 
-    prompt = (
-        "תמלול השיחה הרפואית:\n"
-        "---\n"
-        f"{transcript}\n"
-        "---\n\n"
-        "טקסט מסיכום הביקור (PDF):\n"
-        "---\n"
-        f"{pdf_text}\n"
-        "---\n\n"
-        "אנא הפק סיכום ידידותי למטופל בארבעת הסעיפים הנדרשים."
-    )
+    if transcript:
+        prompt = (
+            "תמלול השיחה הרפואית:\n"
+            "---\n"
+            f"{transcript}\n"
+            "---\n\n"
+            "טקסט מסיכום הביקור (PDF):\n"
+            "---\n"
+            f"{pdf_text}\n"
+            "---\n\n"
+            "אנא הפק סיכום ידידותי למטופל בארבעת הסעיפים הנדרשים."
+        )
+    else:
+        prompt = (
+            "טקסט מסיכום הביקור (PDF):\n"
+            "---\n"
+            f"{pdf_text}\n"
+            "---\n\n"
+            "אנא הפק סיכום ידידותי למטופל בארבעת הסעיפים הנדרשים."
+        )
 
     try:
         response = model.generate_content(prompt)
@@ -161,7 +170,7 @@ _MAX_POLLS = 36  # 36 × 5 s = 3 minutes max
 
 def _did_auth_headers() -> dict:
     """Build D-ID Basic-auth headers (empty username, API key as password)."""
-    token = base64.b64encode(f":{DID_API_KEY}".encode()).decode()
+    token = base64.b64encode(DID_API_KEY.encode()).decode()
     return {
         "Authorization": f"Basic {token}",
         "Content-Type": "application/json",
@@ -299,10 +308,15 @@ def main():
             f"📂 קבצים נטענו: **{pdf_file.name}** ו-**{audio_file.name}**  \n"
             "לחץ על הכפתור להתחלת העיבוד."
         )
+    elif pdf_file:
+        st.info(
+            f"📄 סיכום PDF נטען: **{pdf_file.name}**  \n"
+            "ניתן להוסיף הקלטה, או ללחוץ להמשיך עם הסיכום בלבד."
+        )
 
     run_btn = st.button(
         "🚀 צור סיכום וידאו",
-        disabled=not (pdf_file and audio_file),
+        disabled=not pdf_file,
         use_container_width=True,
         type="primary",
     )
@@ -318,18 +332,22 @@ def main():
                 st.error(str(e))
                 st.stop()
 
-        # ── Stage 2: Whisper ──────────────────────────────────────────────────
-        with st.status("🎙️ שלב 2/4 – תמלול הקלטה (Whisper)...", expanded=False) as s2:
-            try:
-                transcript = transcribe_audio(audio_file)
-                s2.update(label="✅ שלב 2/4 – תמלול הושלם", state="complete")
-            except RuntimeError as e:
-                s2.update(label="❌ שלב 2/4 – כשל בתמלול", state="error")
-                st.error(str(e))
-                st.stop()
+        # ── Stage 2: Whisper (optional) ───────────────────────────────────────
+        transcript = ""
+        if audio_file:
+            with st.status("🎙️ שלב 2/4 – תמלול הקלטה (Whisper)...", expanded=False) as s2:
+                try:
+                    transcript = transcribe_audio(audio_file)
+                    s2.update(label="✅ שלב 2/4 – תמלול הושלם", state="complete")
+                except RuntimeError as e:
+                    s2.update(label="❌ שלב 2/4 – כשל בתמלול", state="error")
+                    st.error(str(e))
+                    st.stop()
 
-        with st.expander("📝 צפה בתמלול המלא"):
-            st.write(transcript)
+            with st.expander("📝 צפה בתמלול המלא"):
+                st.write(transcript)
+        else:
+            st.info("🎙️ שלב 2/4 – לא הועלתה הקלטה, ממשיך עם סיכום PDF בלבד.")
 
         # ── Stage 3: Gemini ───────────────────────────────────────────────────
         with st.status("🤖 שלב 3/4 – יצירת סיכום (Gemini)...", expanded=False) as s3:
